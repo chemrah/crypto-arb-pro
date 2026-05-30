@@ -1,0 +1,131 @@
+name: 🚀 Deploy Smart Contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'hardhat.config.js'
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'الشبكة المراد النشر عليها'
+        required: true
+        default: 'arbitrumSepolia'
+        type: choice
+        options:
+          - arbitrumSepolia
+          - arbitrumOne
+          - baseSepolia
+          - base
+      verify:
+        description: 'التحقق من العقود على Arbiscan'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  deploy:
+    name: 🚀 Deploy to ${{ inputs.network || 'arbitrumSepolia' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Compile contracts
+        run: npx hardhat compile
+
+      - name: 🧪 Run contract tests
+        run: npx hardhat test
+
+      - name: 🚀 Deploy contracts
+        id: deploy
+        run: |
+          echo "🚀 جاري نشر العقود على ${{ inputs.network || 'arbitrumSepolia' }}..."
+          npx hardhat run scripts/deploy.js --network ${{ inputs.network || 'arbitrumSepolia' }} 2>&1 | tee deploy.log
+          
+          # استخراج العناوين من الـ log
+          FLASH_LOAN=$(grep "FlashLoanArbitrage:" deploy.log | awk '{print $2}')
+          FLASH_SWAP=$(grep "FlashSwapArbitrage:" deploy.log | awk '{print $2}')
+          FLASH_MINT=$(grep "FlashMintArbitrage:" deploy.log | awk '{print $2}')
+          MULTI_HOP=$(grep "MultiHopRouter:" deploy.log | awk '{print $2}')
+          
+          echo "flash_loan_address=$FLASH_LOAN" >> $GITHUB_OUTPUT
+          echo "flash_swap_address=$FLASH_SWAP" >> $GITHUB_OUTPUT
+          echo "flash_mint_address=$FLASH_MINT" >> $GITHUB_OUTPUT
+          echo "multi_hop_address=$MULTI_HOP" >> $GITHUB_OUTPUT
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          ARBITRUM_RPC: ${{ secrets.ALCHEMY_API_KEY }}
+          ARBISCAN_API_KEY: ${{ secrets.ARBISCAN_API_KEY }}
+
+      - name: ✅ Verify contracts
+        if: inputs.verify != false
+        run: |
+          echo "✅ جاري التحقق من العقود..."
+          npx hardhat verify --network ${{ inputs.network || 'arbitrumSepolia' }} \
+            ${{ steps.deploy.outputs.flash_loan_address }} \
+            "0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb"
+        env:
+          ARBISCAN_API_KEY: ${{ secrets.ARBISCAN_API_KEY }}
+        continue-on-error: true
+
+      - name: 📝 Save deployment info
+        run: |
+          cat > deployment.json << EOF
+          {
+            "network": "${{ inputs.network || 'arbitrumSepolia' }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "contracts": {
+              "FlashLoanArbitrage": "${{ steps.deploy.outputs.flash_loan_address }}",
+              "FlashSwapArbitrage": "${{ steps.deploy.outputs.flash_swap_address }}",
+              "FlashMintArbitrage": "${{ steps.deploy.outputs.flash_mint_address }}",
+              "MultiHopRouter": "${{ steps.deploy.outputs.multi_hop_address }}"
+            },
+            "deployer": "${{ github.actor }}",
+            "commit": "${{ github.sha }}"
+          }
+          EOF
+          cat deployment.json
+
+      - name: 📤 Upload deployment info
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-info
+          path: deployment.json
+          retention-days: 90
+
+      - name: 💬 Comment on commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `## 🚀 تم نشر العقود بنجاح!
+              
+              **الشبكة:** ${{ inputs.network || 'arbitrumSepolia' }}
+              
+              ### 📦 العقود المنشورة:
+              - **FlashLoanArbitrage:** \`${{ steps.deploy.outputs.flash_loan_address }}\`
+              - **FlashSwapArbitrage:** \`${{ steps.deploy.outputs.flash_swap_address }}\`
+              - **FlashMintArbitrage:** \`${{ steps.deploy.outputs.flash_mint_address }}\`
+              - **MultiHopRouter:** \`${{ steps.deploy.outputs.multi_hop_address }}\`
+              
+              ### 📝 الخطوات التالية:
+              1. انسخ العناوين إلى ملف \`.env\`
+              2. اختبر العقود على Testnet
+              3. حدّث الواجهة الأمامية بالعناوين الجديدة
+              `
+            })

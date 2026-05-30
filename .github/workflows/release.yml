@@ -1,0 +1,118 @@
+name: 🏷️ Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: 🏷️ Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🧪 Run tests
+        run: npm test
+        env:
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+
+      - name: 🏗️ Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_RPC_URL: ${{ secrets.NEXT_PUBLIC_RPC_URL }}
+
+      - name: 📦 Create package
+        run: npm pack
+
+      - name: 📝 Generate changelog
+        id: changelog
+        run: |
+          # استخراج التغييرات من آخر tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGES=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          echo "changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🏷️ Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## 🎉 Crypto Arbitrage Pro ${{ github.ref_name }}
+            
+            ### 📝 التغييرات
+            ${{ steps.changelog.outputs.changes }}
+            
+            ### 📦 التثبيت
+            
+            ```bash
+            npm install crypto-arb-pro@${{ github.ref_name }}
+            ```
+            
+            ### 🚀 البدء السريع
+            
+            ```bash
+            # استنساخ المشروع
+            git clone https://github.com/${{ github.repository }}.git
+            cd crypto-arb-pro
+            
+            # تثبيت الاعتماديات
+            npm install
+            
+            # إعداد المتغيرات البيئية
+            cp .env.example .env
+            # عدّل .env بمفاتيحك
+            
+            # تشغيل المشروع
+            npm run dev:all
+            ```
+            
+            ### 📚 التوثيق
+            
+            - [دليل التنفيذ الشامل](IMPLEMENTATION_GUIDE.md)
+            - [دليل GitHub](GITHUB_GUIDE.md)
+            - [README](README.md)
+            
+            ### 🐛 الإبلاغ عن مشاكل
+            
+            إذا واجهت أي مشكلة، يرجى [فتح Issue جديد](${{ github.server_url }}/${{ github.repository }}/issues/new).
+            
+            ---
+            
+            **Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/${{ github.ref_name }}...HEAD
+          files: |
+            *.tgz
+            README.md
+            IMPLEMENTATION_GUIDE.md
+            GITHUB_GUIDE.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📢 Notify release
+        run: |
+          echo "🎉 تم إنشاء إصدار جديد: ${{ github.ref_name }}"
+          echo "📦 الحزمة جاهزة للتحميل"

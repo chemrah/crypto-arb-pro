@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0d1220;
+  --bg-tertiary: #131b2b;
+  --border: #1e2a3a;
+  --text-primary: #e0e6f0;
+  --text-secondary: #8a96a8;
+  --text-muted: #5a6b82;
+  --accent-cyan: #00d4ff;
+  --accent-purple: #7b61ff;
+  --accent-green: #00e676;
+  --accent-red: #ff4466;
+  --accent-orange: #ff8800;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-dark-700/80 border border-dark-500/50 rounded-xl backdrop-blur-xl;
+  }
+
+  .glow-border {
+    @apply border border-accent-cyan/30 shadow-[0_0_15px_rgba(0,212,255,0.15)];
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-accent-cyan to-accent-purple bg-clip-text text-transparent;
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-accent-cyan/10 border border-accent-cyan/50 text-accent-cyan rounded-lg 
+           hover:bg-accent-cyan/20 hover:border-accent-cyan transition-all duration-200 
+           font-medium text-sm;
+  }
+
+  .btn-danger {
+    @apply px-6 py-3 bg-accent-red/10 border border-accent-red/50 text-accent-red rounded-lg 
+           hover:bg-accent-red/20 hover:border-accent-red transition-all duration-200 
+           font-medium text-sm;
+  }
+
+  .stat-card {
+    @apply glass-card p-4 text-center;
+  }
+
+  .stat-value {
+    @apply text-2xl font-bold font-mono;
+  }
+
+  .stat-label {
+    @apply text-xs text-[var(--text-muted)] mt-1 uppercase tracking-wider;
+  }
+
+  .profit-green {
+    @apply text-accent-green;
+  }
+
+  .profit-red {
+    @apply text-accent-red;
+  }
+
+  .pulse-dot {
+    @apply w-2 h-2 rounded-full bg-accent-green animate-pulse;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}

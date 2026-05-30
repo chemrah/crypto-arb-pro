@@ -1,0 +1,112 @@
+name: 📊 Monitor & Health Check
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # كل 6 ساعات
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: 🔍 Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Run health check
+        id: health
+        run: |
+          echo "🔍 جاري فحص صحة التطبيق..."
+          
+          # فحص الـ API
+          API_URL="${{ secrets.API_URL }}/api/health"
+          response=$(curl -s -w "\n%{http_code}" $API_URL)
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n-1)
+          
+          echo "http_code=$http_code" >> $GITHUB_OUTPUT
+          echo "response=$body" >> $GITHUB_OUTPUT
+          
+          if [ "$http_code" = "200" ]; then
+            echo "✅ الـ API يعمل بشكل صحيح"
+          else
+            echo "❌ خطأ في الـ API: HTTP $http_code"
+            exit 1
+          fi
+
+      - name: 📊 Check blockchain connection
+        run: |
+          echo "🔗 جاري فحص اتصال Blockchain..."
+          
+          node -e "
+            const { ethers } = require('ethers');
+            const provider = new ethers.JsonRpcProvider('${{ secrets.ALCHEMY_API_KEY }}');
+            
+            provider.getBlockNumber()
+              .then(block => {
+                console.log('✅ آخر بلوك:', block);
+                process.exit(0);
+              })
+              .catch(err => {
+                console.error('❌ خطأ في الاتصال:', err.message);
+                process.exit(1);
+              });
+          "
+
+      - name: 📈 Generate report
+        run: |
+          cat > report.txt << EOF
+          📊 تقرير صحة Crypto Arbitrage Pro
+          =====================================
+          
+          🕐 الوقت: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          🌐 الـ API: ${{ steps.health.outputs.http_code == '200' && '✅ يعمل' || '❌ متوقف' }}
+          📦 الإصدار: $(node -p "require('./package.json').version")
+          
+          📝 التفاصيل:
+          ${{ steps.health.outputs.response }}
+          
+          ---
+          تم الإنشاء تلقائياً بواسطة GitHub Actions
+          EOF
+          
+          cat report.txt
+
+      - name: 📧 Send email notification (on failure)
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: 🚨 Crypto Arb Pro - Health Check Failed
+          to: ${{ secrets.EMAIL_TO }}
+          from: Crypto Arb Pro Monitor
+          body: |
+            🚨 تنبيه: فشل فحص الصحة!
+            
+            الوقت: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            يرجى التحقق من:
+            - حالة الخادم
+            - اتصال Blockchain
+            - السجلات (logs)
+            
+            الرابط: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: 📤 Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-report
+          path: report.txt
+          retention-days: 30
