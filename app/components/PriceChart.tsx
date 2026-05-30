@@ -1,140 +1,201 @@
 'use client';
 
+import { useState, useMemo } from 'react';
 import { useArbStore } from '@/lib/store';
-import { useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area, AreaChart } from 'recharts';
+
+const DEX_COLORS: Record<string, string> = {
+  uniswapV3_arb: '#ff007a',
+  uniswapV2_arb: '#ff3399',
+  sushiswap_arb: '#e05baa',
+  camelot: '#f5a623',
+  pancakeswapV3_arb: '#d1884f',
+  traderjoe_arb: '#23b0e5',
+  balancer_arb: '#1f5099',
+  curve_arb: '#ff6b6b',
+  gmx_v2: '#4082f5',
+  ramses: '#c9a227',
+  chronos: '#8b5cf6',
+  zyberswap: '#06b6d4',
+};
+
+const PAIRS = [
+  'WETH/USDC', 'WETH/USDT', 'WBTC/USDC', 'ARB/USDC', 'ARB/WETH',
+  'LINK/USDC', 'UNI/USDC', 'GMX/WETH', 'USDC/USDC.e', 'USDC/USDT',
+  'USDC/DAI', 'DAI/USDT',
+];
+
+const TIME_RANGES = [
+  { id: '1m', label: '1 دقيقة', seconds: 60 },
+  { id: '5m', label: '5 دقائق', seconds: 300 },
+  { id: '15m', label: '15 دقيقة', seconds: 900 },
+  { id: '1h', label: '1 ساعة', seconds: 3600 },
+];
 
 export function PriceChart() {
   const { priceHistory, opportunities } = useArbStore();
+  const [selectedPair, setSelectedPair] = useState('WETH/USDC');
+  const [timeRange, setTimeRange] = useState('5m');
 
   const chartData = useMemo(() => {
-    const pairData: Record<string, { dex: string; prices: number[]; timestamps: number[] }[]> = {};
+    const now = Date.now();
+    const range = TIME_RANGES.find((r) => r.id === timeRange)?.seconds || 300;
 
-    priceHistory.forEach((snapshot) => {
-      if (!pairData[snapshot.pair]) {
-        pairData[snapshot.pair] = [];
+    // Get recent price entries for selected pair
+    const relevant = priceHistory
+      .filter((p) => {
+        const pairKey = Object.keys(p.prices || {}).find((k) => k.includes(selectedPair));
+        return !!pairKey;
+      })
+      .slice(-50);
+
+    return relevant.map((entry, i) => {
+      const priceKey = Object.keys(entry.prices || {}).find((k) => k.includes(selectedPair));
+      const prices = priceKey ? (entry.prices as any) : {};
+      const dexPrices = Array.isArray(prices) ? prices : [];
+
+      const point: any = {
+        time: new Date(Date.now() - (relevant.length - i) * 3000).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        index: i,
+      };
+
+      if (Array.isArray(dexPrices)) {
+        dexPrices.forEach((dp: any) => {
+          if (dp && dp.dexId && dp.price) {
+            point[dp.dexId] = dp.price;
+          }
+        });
       }
-      snapshot.prices.forEach((p) => {
-        let dexData = pairData[snapshot.pair].find((d) => d.dex === p.dexId);
-        if (!dexData) {
-          dexData = { dex: p.dexId, prices: [], timestamps: [] };
-          pairData[snapshot.pair].push(dexData);
-        }
-        dexData.prices.push(p.price);
-        dexData.timestamps.push(p.timestamp);
+
+      return point;
+    });
+  }, [priceHistory, selectedPair, timeRange]);
+
+  // Get unique DEXes from data
+  const activeDexes = useMemo(() => {
+    const dexSet = new Set<string>();
+    chartData.forEach((point) => {
+      Object.keys(point).forEach((key) => {
+        if (key !== 'time' && key !== 'index') dexSet.add(key);
       });
     });
+    return Array.from(dexSet);
+  }, [chartData]);
 
-    return pairData;
-  }, [priceHistory]);
-
-  const dexColors: Record<string, string> = {
-    uniswapV2: '#ff007a',
-    uniswapV3_arb: '#ff007a',
-    sushiswap_arb: '#e05baa',
-    camelot: '#f5a623',
-    pancakeswap_arb: '#d1884f',
-    traderjoe: '#23b0e5',
-    curve_3pool: '#ff6b6b',
-    balancer_arb: '#1f5099',
-    gmx: '#4082f5',
-    ramses: '#c9a227',
-    chronos: '#8b5cf6',
-    zyberswap: '#06b6d4',
-  };
+  // Spread data
+  const spreadData = useMemo(() => {
+    return opportunities
+      .filter((o) => o.pair === selectedPair)
+      .slice(0, 20)
+      .map((o, i) => ({
+        time: new Date(o.timestamp).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+        spread: o.spreadPercent,
+        profit: o.profit.usd,
+      }))
+      .reverse();
+  }, [opportunities, selectedPair]);
 
   return (
     <div className="space-y-6">
+      {/* Controls */}
       <div className="glass-card p-4">
-        <h2 className="text-lg font-bold mb-4">📊 فوارق الأسعار بين المنصات</h2>
-        <p className="text-sm text-gray-400 mb-4">
-          يعرض الرسم البياني فروق الأسعار لنفس الزوج عبر منصات DEX مختلفة. كلما زاد الفرق، زادت فرصة الـ Arbitrage.
-        </p>
-
-        {Object.keys(chartData).length === 0 ? (
-          <div className="h-64 flex items-center justify-center text-gray-500">
-            <div className="text-center">
-              <div className="text-4xl mb-3">📈</div>
-              <p>جاري جمع بيانات الأسعار...</p>
-              <p className="text-xs mt-1">ستظهر الرسوم البيانية قريباً</p>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">📊 الرسوم البيانية</h2>
+            <p className="text-sm text-gray-400">مقارنة الأسعار عبر المنصات في الوقت الحقيقي</p>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={selectedPair}
+              onChange={(e) => setSelectedPair(e.target.value)}
+              className="px-3 py-2 rounded-lg bg-dark-700 border border-dark-500 text-sm focus:outline-none focus:border-accent-cyan"
+            >
+              {PAIRS.map((pair) => (
+                <option key={pair} value={pair}>{pair}</option>
+              ))}
+            </select>
+            <div className="flex bg-dark-700 rounded-lg border border-dark-500 overflow-hidden">
+              {TIME_RANGES.map((range) => (
+                <button
+                  key={range.id}
+                  onClick={() => setTimeRange(range.id)}
+                  className={`px-3 py-2 text-xs font-medium transition-colors ${
+                    timeRange === range.id
+                      ? 'bg-accent-cyan/20 text-accent-cyan'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {range.id}
+                </button>
+              ))}
             </div>
           </div>
-        ) : (
-          <div className="space-y-6">
-            {Object.entries(chartData).map(([pair, dexes]) => (
-              <div key={pair} className="bg-dark-800 rounded-lg p-4">
-                <h3 className="font-bold mb-3">{pair}</h3>
-                <div className="flex flex-wrap gap-3 mb-3">
-                  {dexes.map((d) => (
-                    <div key={d.dex} className="flex items-center gap-2 text-xs">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: dexColors[d.dex] || '#666' }}
-                      />
-                      <span className="text-gray-400">{d.dex}</span>
-                      <span className="font-mono text-white">
-                        {d.prices.length > 0 ? d.prices[d.prices.length - 1].toFixed(4) : '-'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="h-32 relative">
-                  <svg className="w-full h-full" viewBox="0 0 400 100" preserveAspectRatio="none">
-                    {dexes.map((d, di) => {
-                      if (d.prices.length < 2) return null;
-                      const min = Math.min(...d.prices);
-                      const max = Math.max(...d.prices);
-                      const range = max - min || 1;
-                      const points = d.prices.map((p, i) => {
-                        const x = (i / (d.prices.length - 1)) * 400;
-                        const y = 100 - ((p - min) / range) * 80 - 10;
-                        return `${x},${y}`;
-                      }).join(' ');
-                      return (
-                        <polyline
-                          key={di}
-                          points={points}
-                          fill="none"
-                          stroke={dexColors[d.dex] || '#666'}
-                          strokeWidth="2"
-                          opacity="0.8"
-                        />
-                      );
-                    })}
-                  </svg>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
+      {/* Price Chart */}
       <div className="glass-card p-4">
-        <h2 className="text-lg font-bold mb-4">📈 تاريخ الفرص</h2>
-        <div className="h-48 relative">
-          <svg className="w-full h-full" viewBox="0 0 400 150" preserveAspectRatio="none">
-            {opportunities.length > 1 && (
-              <>
-                {opportunities.slice(0, 50).reverse().map((opp, i, arr) => {
-                  const x = (i / (arr.length - 1)) * 400;
-                  const maxProfit = Math.max(...arr.map(o => o.profit.usd));
-                  const y = 150 - (opp.profit.usd / maxProfit) * 130 - 10;
-                  return (
-                    <circle
-                      key={opp.id}
-                      cx={x}
-                      cy={y}
-                      r="4"
-                      fill={opp.profit.usd >= 50 ? '#00e676' : opp.profit.usd >= 10 ? '#00d4ff' : '#ffdd00'}
-                      opacity="0.8"
-                    />
-                  );
-                })}
-              </>
-            )}
-          </svg>
-          {opportunities.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-              لا توجد فرص بعد
+        <h3 className="text-sm font-bold mb-4">سعر {selectedPair} عبر المنصات</h3>
+        <div className="h-80">
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
+                <XAxis dataKey="time" stroke="#666" fontSize={10} />
+                <YAxis stroke="#666" fontSize={10} domain={['auto', 'auto']} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }}
+                  labelStyle={{ color: '#999' }}
+                />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
+                {activeDexes.map((dex) => (
+                  <Line
+                    key={dex}
+                    type="monotone"
+                    dataKey={dex}
+                    stroke={DEX_COLORS[dex] || '#888'}
+                    strokeWidth={2}
+                    dot={false}
+                    name={dex.replace(/_/g, ' ')}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <div className="text-4xl mb-3">📊</div>
+                <p>في انتظار بيانات الأسعار...</p>
+                <p className="text-xs mt-1">سيتم عرض الرسم البياني بعد أول مسح</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Spread Chart */}
+      <div className="glass-card p-4">
+        <h3 className="text-sm font-bold mb-4">📈 انتشار السعر والربح — {selectedPair}</h3>
+        <div className="h-60">
+          {spreadData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={spreadData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
+                <XAxis dataKey="time" stroke="#666" fontSize={10} />
+                <YAxis stroke="#666" fontSize={10} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333', borderRadius: '8px' }}
+                />
+                <Area type="monotone" dataKey="profit" stroke="#22c55e" fill="#22c55e20" name="الربح ($)" />
+                <Area type="monotone" dataKey="spread" stroke="#22d3ee" fill="#22d3ee20" name="الانتشار (%)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <div className="text-3xl mb-2">📈</div>
+                <p className="text-sm">لا توجد بيانات انتشار بعد لـ {selectedPair}</p>
+              </div>
             </div>
           )}
         </div>

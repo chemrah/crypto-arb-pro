@@ -52,7 +52,6 @@ contract FlashMintArbitrage is ReentrancyGuard {
     address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
     address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address public constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
-
     address public constant CURVE_3POOL = 0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7;
 
     uint256 public constant MAX_FLASH_MINT = 500_000_000e18;
@@ -191,30 +190,6 @@ contract FlashMintArbitrage is ReentrancyGuard {
         );
 
         return daiReceived;
-    }
-
-    function executeMultiPathFlashMint(
-        uint256 amount,
-        address[] calldata routers,
-        address[][] calldata paths,
-        uint256[] calldata minAmountsOut,
-        uint256 minProfit
-    ) external onlyOperator whenNotPaused nonReentrant {
-        FlashMintRoute memory route = FlashMintRoute({
-            routers: routers,
-            paths: paths,
-            minAmountsOut: minAmountsOut,
-            minProfit: minProfit
-        });
-
-        bytes memory data = abi.encode(route, msg.sender);
-
-        IDaiFlashMint(DAI_FLASH_MINT_MODULE).flashLoan(
-            address(this),
-            DAI,
-            amount,
-            data
-        );
     }
 
     function setOperator(address _operator) external onlyOwner {

@@ -1,12 +1,43 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {FlashLoanSimpleReceiverBase} from "@aave/v3-core/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol";
-import {IPoolAddressesProvider} from "@aave/v3-core/contracts/interfaces/IPoolAddressesProvider.sol";
-import {IPool} from "@aave/v3-core/contracts/interfaces/IPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+interface IPoolAddressesProvider {
+    function getPool() external view returns (address);
+}
+
+interface IPool {
+    function flashLoanSimple(
+        address receiverAddress,
+        address asset,
+        uint256 amount,
+        bytes calldata params,
+        uint16 referralCode
+    ) external;
+}
+
+interface IFlashLoanSimpleReceiver {
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external returns (bool);
+}
+
+abstract contract FlashLoanSimpleReceiverBase is IFlashLoanSimpleReceiver {
+    IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
+    IPool public immutable POOL;
+
+    constructor(IPoolAddressesProvider provider) {
+        ADDRESSES_PROVIDER = provider;
+        POOL = IPool(provider.getPool());
+    }
+}
 
 struct SwapParams {
     address router;
@@ -67,7 +98,6 @@ contract FlashLoanArbitrage is FlashLoanSimpleReceiverBase, ReentrancyGuard {
         ArbRoute calldata route
     ) external onlyOperator whenNotPaused nonReentrant {
         bytes memory params = abi.encode(route);
-
         POOL.flashLoanSimple(address(this), asset, amount, params, 0);
     }
 
@@ -124,20 +154,6 @@ contract FlashLoanArbitrage is FlashLoanSimpleReceiverBase, ReentrancyGuard {
         require(amountOut >= swap.minAmountOut, "Slippage exceeded");
 
         return amountOut;
-    }
-
-    function executeMultiTokenArbitrage(
-        address[] calldata assets,
-        uint256[] calldata amounts,
-        ArbRoute[] calldata routes
-    ) external onlyOperator whenNotPaused nonReentrant {
-        require(assets.length == amounts.length, "Length mismatch");
-        require(assets.length == routes.length, "Routes mismatch");
-
-        for (uint256 i = 0; i < assets.length; i++) {
-            bytes memory params = abi.encode(routes[i]);
-            POOL.flashLoanSimple(address(this), assets[i], amounts[i], params, 0);
-        }
     }
 
     function setOperator(address _operator) external onlyOwner {

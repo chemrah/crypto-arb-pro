@@ -5,6 +5,10 @@ const cors = require('cors');
 const { Scanner } = require('./services/scanner');
 const { ArbitrageEngine } = require('./services/arbitrage-engine');
 const { DexPriceAggregator } = require('./services/dex-prices');
+const { RPCManager } = require('./services/rpc-manager');
+const { priceFeed } = require('./services/price-feed');
+const { GaslessExecutor } = require('./services/executor');
+const { ethers } = require('ethers');
 require('dotenv').config({ path: '../.env' });
 
 const app = express();
@@ -14,21 +18,69 @@ const wss = new WebSocket.Server({ server });
 app.use(cors());
 app.use(express.json());
 
-const dexAggregator = new DexPriceAggregator();
-const arbEngine = new ArbitrageEngine();
-const scanner = new Scanner(dexAggregator, arbEngine);
+// --- Initialize all services ---
+const rpcManager = new RPCManager(
+  process.env.ALCHEMY_API_KEY,
+  process.env.INFURA_API_KEY
+);
 
+const networkMode = process.env.NETWORK_MODE || 'mainnet';
+rpcManager.switchNetwork(networkMode);
+
+const dexAggregator = new DexPriceAggregator(rpcManager);
+const arbEngine = new ArbitrageEngine(priceFeed);
+const scanner = new Scanner(dexAggregator, arbEngine, rpcManager, priceFeed);
+scanner.setNetworkMode(networkMode);
+scanner.setMinProfit(parseFloat(process.env.MIN_PROFIT_USD || '1'));
+
+// Initialize executor with signer
+let executor = null;
+try {
+  if (process.env.PRIVATE_KEY) {
+    const provider = rpcManager.getProvider('arbitrum', networkMode);
+    const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+    executor = new GaslessExecutor({
+      provider,
+      signer,
+      biconomyApiKey: process.env.BICONOMY_API_KEY,
+      bundlerUrl: process.env.BUNDLER_URL,
+      paymasterUrl: process.env.BICONOMY_PAYMASTER_URL,
+      relayUrl: process.env.FLASHBOTS_RELAY,
+      contracts: {
+        flashLoan: process.env.FLASH_LOAN_CONTRACT,
+        flashSwap: process.env.FLASH_SWAP_CONTRACT,
+        flashMint: process.env.FLASH_MINT_CONTRACT,
+      },
+    });
+    console.log('[Server] ✅ Executor مُهيّأ مع محفظة:', signer.address);
+  } else {
+    console.warn('[Server] ⚠️ لا يوجد PRIVATE_KEY — التنفيذ التلقائي معطل');
+  }
+} catch (e) {
+  console.error('[Server] ❌ خطأ في تهيئة Executor:', e.message);
+}
+
+// --- State ---
 let connectedClients = new Set();
 let latestOpportunities = [];
+let autoExecuteEnabled = process.env.AUTO_EXECUTE === 'true';
+let autoExecuteMinProfit = parseFloat(process.env.MIN_PROFIT_USD || '5');
+let lastAutoExecution = 0;
+const AUTO_EXECUTE_COOLDOWN = 10000; // 10 seconds between auto-executions
+
 let stats = {
   totalScans: 0,
   opportunitiesFound: 0,
   totalProfit: 0,
   activePairs: 0,
+  executionsTotal: 0,
+  executionsSuccess: 0,
+  gasSaved: 0,
   lastScan: null,
   uptime: Date.now(),
 };
 
+// --- WebSocket ---
 wss.on('connection', (ws) => {
   console.log('[WS] عميل جديد متصل');
   connectedClients.add(ws);
@@ -37,14 +89,18 @@ wss.on('connection', (ws) => {
     type: 'connected',
     data: {
       message: 'متصل بخادم Arbitrage Pro',
-      opportunities: latestOpportunities,
+      opportunities: latestOpportunities.slice(0, 50),
       stats,
+      networkMode: scanner.networkMode,
+      autoExecute: {
+        enabled: autoExecuteEnabled,
+        minProfit: autoExecuteMinProfit,
+      },
     },
   }));
 
   ws.on('close', () => {
     connectedClients.delete(ws);
-    console.log('[WS] عميل غادر');
   });
 
   ws.on('message', (msg) => {
@@ -57,15 +113,15 @@ wss.on('connection', (ws) => {
   });
 });
 
-function handleClientMessage(ws, msg) {
+async function handleClientMessage(ws, msg) {
   switch (msg.type) {
     case 'subscribe_pair':
-      scanner.addPair(msg.data.tokenA, msg.data.tokenB);
+      scanner.addPair(msg.data.tokenA, msg.data.tokenB, msg.data.chain);
       ws.send(JSON.stringify({ type: 'subscribed', data: msg.data }));
       break;
 
     case 'unsubscribe_pair':
-      scanner.removePair(msg.data.tokenA, msg.data.tokenB);
+      scanner.removePair(msg.data.tokenA, msg.data.tokenB, msg.data.chain);
       ws.send(JSON.stringify({ type: 'unsubscribed', data: msg.data }));
       break;
 
@@ -74,16 +130,151 @@ function handleClientMessage(ws, msg) {
       break;
 
     case 'get_opportunities':
-      ws.send(JSON.stringify({ type: 'opportunities', data: latestOpportunities }));
+      ws.send(JSON.stringify({ type: 'opportunities', data: latestOpportunities.slice(0, 100) }));
       break;
 
     case 'simulate_trade':
-      const result = arbEngine.simulateTrade(msg.data);
-      ws.send(JSON.stringify({ type: 'simulation_result', data: result }));
+      const simResult = arbEngine.simulateTrade(msg.data);
+      ws.send(JSON.stringify({ type: 'simulation_result', data: simResult }));
+      break;
+
+    case 'execute_opportunity':
+      await handleExecution(ws, msg.data);
+      break;
+
+    case 'toggle_auto_execute':
+      autoExecuteEnabled = msg.data.enabled;
+      if (msg.data.minProfit !== undefined) autoExecuteMinProfit = msg.data.minProfit;
+      broadcast({
+        type: 'auto_execute_toggled',
+        data: { enabled: autoExecuteEnabled, minProfit: autoExecuteMinProfit },
+      });
+      console.log(`[AutoExec] ${autoExecuteEnabled ? 'مُفعّل' : 'معطل'} — الحد الأدنى: $${autoExecuteMinProfit}`);
+      break;
+
+    case 'switch_network':
+      const newMode = msg.data.mode;
+      if (newMode === 'testnet' || newMode === 'mainnet') {
+        scanner.setNetworkMode(newMode);
+        rpcManager.switchNetwork(newMode);
+        if (dexAggregator.setNetworkMode) dexAggregator.setNetworkMode(newMode);
+        latestOpportunities = [];
+        broadcast({ type: 'network_switched', data: { mode: newMode } });
+        console.log(`[Server] تبديل الشبكة إلى: ${newMode}`);
+      }
       break;
 
     default:
       ws.send(JSON.stringify({ type: 'error', data: { message: 'نوع رسالة غير معروف' } }));
+  }
+}
+
+async function handleExecution(ws, data) {
+  const { opportunityId, strategy, walletAddress } = data;
+
+  if (!executor) {
+    ws.send(JSON.stringify({
+      type: 'execution_failed',
+      data: { error: 'Executor غير مُهيّأ — تحقق من PRIVATE_KEY' },
+    }));
+    return;
+  }
+
+  const opportunity = latestOpportunities.find((o) => o.id === opportunityId);
+  if (!opportunity) {
+    ws.send(JSON.stringify({
+      type: 'execution_failed',
+      data: { error: 'الفرصة غير موجودة' },
+    }));
+    return;
+  }
+
+  if (Date.now() - opportunity.timestamp > 15000) {
+    ws.send(JSON.stringify({
+      type: 'execution_failed',
+      data: { error: 'الفرصة منتهية الصلاحية', pair: opportunity.pair },
+    }));
+    return;
+  }
+
+  // Broadcast execution started
+  broadcast({
+    type: 'execution_started',
+    data: { step: 1, totalSteps: 5, action: '🏦 طلب Flash Loan...', pair: opportunity.pair },
+  });
+
+  try {
+    // Step 2: Simulate first
+    broadcast({
+      type: 'execution_step',
+      data: { step: 2, totalSteps: 5, action: '🔍 محاكاة التنفيذ...' },
+    });
+
+    const simResult = await executor.simulateExecution(opportunity, strategy || 'flash_loan');
+    if (!simResult.success) {
+      broadcast({
+        type: 'execution_failed',
+        data: {
+          error: `فشلت المحاكاة: ${simResult.error}`,
+          pair: opportunity.pair,
+          strategy,
+        },
+      });
+      return;
+    }
+
+    // Step 3: Execute
+    broadcast({
+      type: 'execution_step',
+      data: { step: 3, totalSteps: 5, action: `🛒 شراء من ${opportunity.buyDex}...` },
+    });
+
+    const result = await executor.executeArbitrage(
+      opportunity,
+      walletAddress || executor.signer?.address,
+      strategy || 'flash_loan'
+    );
+
+    if (result.success) {
+      stats.executionsSuccess++;
+      stats.totalProfit += opportunity.profit.usd;
+      stats.gasSaved += result.gasCost?.gasCostUSD || 0;
+
+      broadcast({
+        type: 'execution_step',
+        data: { step: 5, totalSteps: 5, action: '💰 تم التنفيذ بنجاح!', txHash: result.transactionHash },
+      });
+
+      broadcast({
+        type: 'execution_confirmed',
+        data: {
+          pair: opportunity.pair,
+          strategy: strategy || 'flash_loan',
+          buyDex: opportunity.buyDex,
+          sellDex: opportunity.sellDex,
+          profit: opportunity.profit.usd,
+          txHash: result.transactionHash || result.userOpHash,
+          gasUsed: result.gasUsed,
+          gasCost: result.gasCost?.gasCostUSD || 0,
+        },
+      });
+    } else {
+      broadcast({
+        type: 'execution_failed',
+        data: {
+          error: result.error,
+          pair: opportunity.pair,
+          strategy,
+        },
+      });
+    }
+
+    stats.executionsTotal++;
+  } catch (error) {
+    broadcast({
+      type: 'execution_failed',
+      data: { error: error.message, pair: opportunity.pair, strategy },
+    });
   }
 }
 
@@ -96,21 +287,62 @@ function broadcast(data) {
   });
 }
 
+// --- Scanner Events ---
 scanner.on('opportunity', (opportunity) => {
   latestOpportunities.unshift(opportunity);
-  if (latestOpportunities.length > 100) {
-    latestOpportunities = latestOpportunities.slice(0, 100);
+  if (latestOpportunities.length > 200) {
+    latestOpportunities = latestOpportunities.slice(0, 200);
   }
 
   stats.opportunitiesFound++;
-  stats.totalProfit += opportunity.profit.usd;
 
-  broadcast({
-    type: 'new_opportunity',
-    data: opportunity,
-  });
+  broadcast({ type: 'new_opportunity', data: opportunity });
 
   console.log(`[فرصة] ${opportunity.pair} | ربح: $${opportunity.profit.usd.toFixed(2)} | ${opportunity.buyDex} → ${opportunity.sellDex}`);
+
+  // Auto-execute if enabled
+  if (autoExecuteEnabled && executor && opportunity.profit.usd >= autoExecuteMinProfit) {
+    const now = Date.now();
+    if (now - lastAutoExecution > AUTO_EXECUTE_COOLDOWN) {
+      lastAutoExecution = now;
+      console.log(`[AutoExec] ⚡ تنفيذ تلقائي: ${opportunity.pair} — ربح: $${opportunity.profit.usd.toFixed(2)}`);
+
+      executor.executeArbitrage(opportunity, executor.signer?.address, 'flash_loan')
+        .then((result) => {
+          broadcast({
+            type: 'auto_execute_result',
+            data: {
+              pair: opportunity.pair,
+              strategy: 'flash_loan',
+              buyDex: opportunity.buyDex,
+              sellDex: opportunity.sellDex,
+              profit: result.success ? opportunity.profit.usd : 0,
+              txHash: result.transactionHash || result.userOpHash || '',
+              success: result.success,
+              error: result.error,
+              gasUsed: result.gasUsed,
+              gasCost: result.gasCost?.gasCostUSD || 0,
+            },
+          });
+          if (result.success) {
+            stats.executionsSuccess++;
+            stats.totalProfit += opportunity.profit.usd;
+          }
+          stats.executionsTotal++;
+        })
+        .catch((e) => {
+          console.error('[AutoExec] خطأ:', e.message);
+          broadcast({
+            type: 'auto_execute_result',
+            data: {
+              pair: opportunity.pair,
+              success: false,
+              error: e.message,
+            },
+          });
+        });
+    }
+  }
 });
 
 scanner.on('scan_complete', (scanStats) => {
@@ -120,25 +352,27 @@ scanner.on('scan_complete', (scanStats) => {
 
   broadcast({
     type: 'scan_update',
-    data: {
-      stats,
-      prices: scanStats.prices,
-    },
+    data: { stats, prices: scanStats.prices },
   });
 });
 
 scanner.on('price_update', (priceData) => {
-  broadcast({
-    type: 'price_update',
-    data: priceData,
-  });
+  broadcast({ type: 'price_update', data: priceData });
 });
 
+scanner.on('eth_price_update', (priceData) => {
+  broadcast({ type: 'eth_price_update', data: priceData });
+});
+
+// --- REST API ---
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     uptime: Date.now() - stats.uptime,
     clients: connectedClients.size,
+    networkMode: scanner.networkMode,
+    autoExecute: autoExecuteEnabled,
+    executorReady: !!executor,
     stats,
   });
 });
@@ -151,9 +385,7 @@ app.get('/api/opportunities', (req, res) => {
   res.json(filtered);
 });
 
-app.get('/api/stats', (req, res) => {
-  res.json(stats);
-});
+app.get('/api/stats', (req, res) => res.json(stats));
 
 app.get('/api/prices', async (req, res) => {
   try {
@@ -172,6 +404,23 @@ app.get('/api/pairs', (req, res) => {
   res.json(scanner.getTrackedPairs());
 });
 
+app.get('/api/network', (req, res) => {
+  res.json({ mode: scanner.networkMode });
+});
+
+app.post('/api/network', (req, res) => {
+  const { mode } = req.body;
+  if (mode === 'testnet' || mode === 'mainnet') {
+    scanner.setNetworkMode(mode);
+    rpcManager.switchNetwork(mode);
+    latestOpportunities = [];
+    broadcast({ type: 'network_switched', data: { mode } });
+    res.json({ success: true, mode });
+  } else {
+    res.status(400).json({ error: 'Invalid mode' });
+  }
+});
+
 app.post('/api/simulate', (req, res) => {
   try {
     const result = arbEngine.simulateTrade(req.body);
@@ -181,33 +430,69 @@ app.post('/api/simulate', (req, res) => {
   }
 });
 
-app.post('/api/execute', async (req, res) => {
+app.post('/api/execute/simulate', async (req, res) => {
+  if (!executor) {
+    return res.status(503).json({ error: 'Executor غير مُهيّأ' });
+  }
   try {
-    const { opportunityId, walletAddress, strategy } = req.body;
+    const { opportunityId, strategy } = req.body;
     const opportunity = latestOpportunities.find((o) => o.id === opportunityId);
+    if (!opportunity) return res.status(404).json({ error: 'الفرصة غير موجودة' });
 
-    if (!opportunity) {
-      return res.status(404).json({ error: 'الفرصة غير موجودة' });
-    }
-
-    if (Date.now() - opportunity.timestamp > 15000) {
-      return res.status(410).json({ error: 'الفرصة منتهية الصلاحية' });
-    }
-
-    const executionPlan = arbEngine.buildExecutionPlan(opportunity, walletAddress, strategy);
-    res.json(executionPlan);
+    const result = await executor.simulateExecution(opportunity, strategy || 'flash_loan');
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+app.post('/api/execute', async (req, res) => {
+  if (!executor) {
+    return res.status(503).json({ error: 'Executor غير مُهيّأ — تحقق من PRIVATE_KEY' });
+  }
+  try {
+    const { opportunityId, walletAddress, strategy } = req.body;
+    const opportunity = latestOpportunities.find((o) => o.id === opportunityId);
+
+    if (!opportunity) return res.status(404).json({ error: 'الفرصة غير موجودة' });
+    if (Date.now() - opportunity.timestamp > 15000) {
+      return res.status(410).json({ error: 'الفرصة منتهية الصلاحية' });
+    }
+
+    const result = await executor.executeArbitrage(
+      opportunity,
+      walletAddress || executor.signer?.address,
+      strategy || 'flash_loan'
+    );
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/auto-execute', (req, res) => {
+  const { enabled, minProfit, maxGasGwei } = req.body;
+  if (typeof enabled === 'boolean') autoExecuteEnabled = enabled;
+  if (typeof minProfit === 'number') autoExecuteMinProfit = minProfit;
+  broadcast({
+    type: 'auto_execute_toggled',
+    data: { enabled: autoExecuteEnabled, minProfit: autoExecuteMinProfit },
+  });
+  res.json({ enabled: autoExecuteEnabled, minProfit: autoExecuteMinProfit });
+});
+
+// --- Start ---
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`\n╔══════════════════════════════════════════╗`);
-  console.log(`║   Crypto Arbitrage Pro - Server          ║`);
-  console.log(`║   المنفذ: ${PORT}                           ║`);
-  console.log(`║   WebSocket: ws://localhost:${PORT}         ║`);
-  console.log(`╚══════════════════════════════════════════╝\n`);
+  console.log(`\n╔══════════════════════════════════════════════════════╗`);
+  console.log(`║   ⚡ Crypto Arbitrage Pro — Real Execution Server    ║`);
+  console.log(`║   📡 Port: ${PORT}                                      ║`);
+  console.log(`║   🌐 Network: ${scanner.networkMode.padEnd(37)}║`);
+  console.log(`║   🤖 Auto-Execute: ${autoExecuteEnabled ? 'ON' : 'OFF'}                              ║`);
+  console.log(`║   💰 Min Profit: $${autoExecuteMinProfit}                                ║`);
+  console.log(`║   🔑 Executor: ${executor ? 'Ready' : 'Not configured'}                          ║`);
+  console.log(`║   🏦 DEXes: 59 across 6 chains                       ║`);
+  console.log(`╚══════════════════════════════════════════════════════╝\n`);
 
   scanner.start();
 });

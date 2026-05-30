@@ -1,297 +1,82 @@
-# 🤝 دليل المساهمة
+# Contributing to Crypto Arbitrage Pro
 
-شكراً لاهتمامك بالمساهمة في **Crypto Arbitrage Pro**! 🎉
+Thank you for your interest in contributing! This project is an open-source DeFi arbitrage platform, and we welcome contributions of all kinds.
 
-هذا الدليل سيساعدك على فهم كيفية المساهمة في المشروع.
+## 🚀 Getting Started
 
----
+1. **Fork** the repository
+2. **Clone** your fork:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/crypto-arb-pro.git
+   cd crypto-arb-pro
+   ```
+3. **Install** dependencies:
+   ```bash
+   npm install
+   ```
+4. **Create** a branch:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-## 📋 جدول المحتويات
+## 📋 Development Guidelines
 
-- [مدونة السلوك](#مدونة-السلوك)
-- [كيف يمكنني المساهمة؟](#كيف-يمكنني-المساهمة)
-- [الإبلاغ عن الأخطاء](#الإبلاغ-عن-الأخطاء)
-- [اقتراح الميزات](#اقتراح-الميزات)
-- [عملية المساهمة](#عملية-المساهمة)
-- [معايير الكود](#معايير-الكود)
-- [Commit Messages](#commit-messages)
-- [Pull Requests](#pull-requests)
+### Code Style
 
----
+- **JavaScript/TypeScript**: Follow ESLint rules, use 2-space indentation
+- **Solidity**: Follow Solhint rules, use NatSpec documentation
+- **CSS**: Use TailwindCSS utility classes, follow existing design system
+- **Comments**: Write code comments in English, UI text in Arabic (matching existing codebase)
 
-## مدونة السلوك
+### Commit Messages
 
-نحن نتبع [مدونة السلوك](CODE_OF_CONDUCT.md). بالمساهمة، أنت توافق على الالتزام بها.
-
----
-
-## كيف يمكنني المساهمة؟
-
-### 🐛 الإبلاغ عن الأخطاء
-
-إذا وجدت خطأً:
-
-1. **تحقق من Issues الموجودة** - ربما تم الإبلاغ عنه بالفعل
-2. **أنشئ Issue جديد** باستخدام قالب Bug Report
-3. **قدم معلومات مفصلة**:
-   - خطوات إعادة الإنتاج
-   - السلوك المتوقع vs الفعلي
-   - لقطات شاشة (إذا أمكن)
-   - معلومات البيئة (OS, Node.js, etc.)
-
-### ✨ اقتراح الميزات
-
-لديك فكرة لميزة جديدة؟
-
-1. **تحقق من Issues الموجودة** - ربما تم اقتراحها بالفعل
-2. **أنشئ Issue جديد** باستخدام قالب Feature Request
-3. **اشرح الفائدة** - كيف ستفيد المستخدمين؟
-4. **قدم أمثلة** - mockups أو أمثلة مشابهة
-
-### 📝 تحسين التوثيق
-
-التوثيق مهم جداً! يمكنك:
-
-- إصلاح أخطاء إملائية
-- إضافة أمثلة
-- توضيح نقاط غامضة
-- ترجمة التوثيق
-
-### 💻 المساهمة بالكود
-
-إذا كنت تريد المساهمة بالكود:
-
-1. **اختر Issue** - ابحث عن issues مع label `good first issue`
-2. **علق على Issue** - أخبرنا أنك تعمل عليه
-3. **اتبع عملية المساهمة** - انظر أدناه
-
----
-
-## عملية المساهمة
-
-### 1. Fork المشروع
-
-```bash
-# على GitHub، اضغط "Fork"
-# ثم استنسخ نسختك
-git clone https://github.com/YOUR_USERNAME/crypto-arb-pro.git
-cd crypto-arb-pro
+Use conventional commits:
+```
+feat: add new DEX integration for Trader Joe
+fix: correct price calculation in arbitrage engine
+docs: update deployment guide
+refactor: simplify scanner deduplication logic
+test: add flash loan integration tests
 ```
 
-### 2. أضف Remote الأصلي
+### Pull Request Process
 
-```bash
-git remote add upstream https://github.com/ORIGINAL_OWNER/crypto-arb-pro.git
-```
+1. Update the README.md with details of your changes if applicable
+2. Ensure all tests pass: `npx hardhat test`
+3. Ensure the app builds: `npm run build`
+4. Request a review from a maintainer
 
-### 3. أنشئ فرع جديد
+## 🏗️ Project Areas
 
-```bash
-# تأكد أنك على أحدث نسخة
-git checkout main
-git pull upstream main
+### Adding a New DEX
 
-# أنشئ فرع للميزة
-git checkout -b feat/your-feature-name
+1. Add DEX config to `server/dex/abis.js`:
+   ```js
+   { id: 'newdex_chain', name: 'NewDex', chain: 'arbitrum', type: 'v2', router: '0x...', factory: '0x...', fee: 0.003 }
+   ```
+2. If the DEX uses a non-standard AMM (not V2/V3/Curve/Balancer), add a pricing handler in `server/services/dex-prices.js`
+3. Add the DEX to the UI in `app/components/DexOverview.tsx`
 
-# أو فرع لإصلاح خطأ
-git checkout -b fix/your-bug-fix
-```
+### Adding a New Chain
 
-### 4. اعمل على التغييرات
+1. Add RPC endpoints to `server/services/rpc-manager.js`
+2. Add chain config to `lib/wallet.ts` (SUPPORTED_CHAINS and CHAIN_PARAMS)
+3. Add token addresses for the chain in `server/dex/abis.js`
+4. Add chain color and icon to `app/globals.css` and component color maps
 
-- اكتب كود نظيف ومقروء
-- أضف اختبارات إذا لزم الأمر
-- حدّث التوثيق إذا لزم الأمر
+### Smart Contract Changes
 
-### 5. اختبر التغييرات
+1. Make changes in `contracts/`
+2. Write tests in `test/`
+3. Run tests: `npx hardhat test`
+4. Deploy to testnet first: `npx hardhat run scripts/deploy.js --network arbitrumSepolia`
 
-```bash
-# شغّل الاختبارات
-npm test
+## ⚠️ Security
 
-# شغّل Linter
-npm run lint
+- **Never** commit private keys or API keys
+- **Always** test on testnet before mainnet
+- Report security vulnerabilities via email (not public issues)
 
-# اختبر محلياً
-npm run dev:all
-```
+## 📄 License
 
-### 6. أنشئ Commit
-
-```bash
-git add .
-git commit -m "🎉 feat: إضافة ميزة جديدة"
-```
-
-**استخدم Conventional Commits:**
-
-- `🎉 feat:` ميزة جديدة
-- `🐛 fix:` إصلاح خطأ
-- `📝 docs:` تحديث التوثيق
-- `♻️ refactor:` إعادة هيكلة
-- `⚡ perf:` تحسين الأداء
-- `✅ test:` إضافة اختبارات
-- `🔧 chore:` مهام صيانة
-
-### 7. ارفع الفرع
-
-```bash
-git push origin feat/your-feature-name
-```
-
-### 8. أنشئ Pull Request
-
-1. اذهب إلى GitHub
-2. اضغط "Compare & pull request"
-3. املأ قالب PR بالكامل
-4. انتظر المراجعة
-
----
-
-## معايير الكود
-
-### JavaScript/TypeScript
-
-```javascript
-// ✅ جيد
-const calculateProfit = (buyPrice, sellPrice, amount) => {
-  const profit = (sellPrice - buyPrice) * amount;
-  return profit;
-};
-
-// ❌ سيء
-const calc = (a, b, c) => {
-  return (b - a) * c;
-};
-```
-
-### Solidity
-
-```solidity
-// ✅ جيد
-function executeArbitrage(
-    address asset,
-    uint256 amount,
-    bytes calldata data
-) external onlyOperator whenNotPaused nonReentrant {
-    require(amount > 0, "Amount must be greater than 0");
-    // ...
-}
-
-// ❌ سيء
-function exec(address a, uint b, bytes calldata c) external {
-    // ...
-}
-```
-
-### التسمية
-
-- **المتغيرات والدوال:** camelCase
-- **الثوابت:** UPPER_SNAKE_CASE
-- **العقود والكلاسات:** PascalCase
-- **الملفات:** kebab-case
-
-### التعليقات
-
-```javascript
-// أضف تعليقات فقط عندما يكون الكود غير واضح
-// ❌ سيء
-const x = 5; // تعيين x إلى 5
-
-// ✅ جيد
-// حساب الربح الصافي بعد خصم جميع الرسوم
-const netProfit = grossProfit - fees - gasCost;
-```
-
----
-
-## Commit Messages
-
-### الصيغة
-
-```
-<emoji> <type>: <description>
-
-[optional body]
-
-[optional footer]
-```
-
-### أمثلة
-
-```bash
-🎉 feat: إضافة دعم Uniswap V3 على Arbitrum
-
-- إضافة Uniswap V3 Router
-- تحديث ABIs
-- إضافة اختبارات
-
-Closes #42
-```
-
-```bash
-🐛 fix: إصلاح حساب الربح عند استخدام Flash Mint
-
-كان الربح يُحسب بشكل خاطئ عندما يكون fee = 0
-
-Fixes #123
-```
-
----
-
-## Pull Requests
-
-### قبل الإرسال
-
-- [ ] راجعت الكود بنفسي
-- [ ] أضفت اختبارات
-- [ ] جميع الاختبارات تنجح
-- [ ] التوثيق محدّث
-- [ ] لا توجد أسرار في الكود
-
-### قالب PR
-
-استخدم القالب الموجود في `.github/PULL_REQUEST_TEMPLATE.md`
-
-### بعد الإرسال
-
-- كن متاحاً للأسئلة
-- استجب للمراجعات بسرعة
-- كن محترماً في النقاش
-
----
-
-## 🏷️ Labels
-
-نستخدم هذه الـ labels:
-
-- `bug` - خطأ
-- `enhancement` - ميزة جديدة
-- `documentation` - توثيق
-- `good first issue` - مناسب للمبتدئين
-- `help wanted` - نحتاج مساعدة
-- `question` - سؤال
-- `wontfix` - لن يتم إصلاحه
-
----
-
-## 📞 التواصل
-
-- **GitHub Issues:** للأسئلة التقنية
-- **Discord:** للنقاش العام
-- **Email:** للأمور الخاصة
-
----
-
-## 🙏 شكراً لك!
-
-مساهماتك تجعل المشروع أفضل! 🎉
-
----
-
-<div align="center">
-
-**صُنع بـ ❤️ من مجتمع الكريبتو العربي**
-
-</div>
+By contributing, you agree that your contributions will be licensed under the MIT License.

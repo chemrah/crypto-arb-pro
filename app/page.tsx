@@ -10,10 +10,23 @@ import { PriceChart } from './components/PriceChart';
 import { OpportunityDetail } from './components/OpportunityDetail';
 import { DexOverview } from './components/DexOverview';
 import { ExecutionPanel } from './components/ExecutionPanel';
+import { ProfitCalculator } from './components/ProfitCalculator';
+import { ExecutionHistory } from './components/ExecutionHistory';
+
+const TABS = [
+  { id: 'opportunities', label: 'الفرص الحية', icon: '🎯' },
+  { id: 'chart', label: 'الرسوم البيانية', icon: '📊' },
+  { id: 'dexes', label: 'المنصات', icon: '🏦' },
+  { id: 'execute', label: 'التنفيذ', icon: '⚡' },
+  { id: 'calculator', label: 'حاسبة الأرباح', icon: '🧮' },
+  { id: 'history', label: 'السجل', icon: '📜' },
+] as const;
+
+type TabId = typeof TABS[number]['id'];
 
 export default function Home() {
-  const { isConnected, setConnected, selectedOpportunity } = useArbStore();
-  const [activeTab, setActiveTab] = useState<'opportunities' | 'chart' | 'dexes' | 'execute'>('opportunities');
+  const { isConnected, selectedOpportunity } = useArbStore();
+  const [activeTab, setActiveTab] = useState<TabId>('opportunities');
 
   useEffect(() => {
     const cleanup = connectWebSocket();
@@ -21,25 +34,21 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-dark-900">
       <Header />
 
       <main className="flex-1 p-4 lg:p-6 space-y-6">
         <StatsGrid />
 
-        <div className="flex gap-2 border-b border-dark-500 pb-2">
-          {[
-            { id: 'opportunities', label: 'الفرص الحية', icon: '🎯' },
-            { id: 'chart', label: 'الرسوم البيانية', icon: '📊' },
-            { id: 'dexes', label: 'المنصات', icon: '🏦' },
-            { id: 'execute', label: 'التنفيذ', icon: '⚡' },
-          ].map((tab) => (
+        {/* Tab Navigation */}
+        <div className="flex gap-2 border-b border-dark-500 pb-2 overflow-x-auto scrollbar-thin">
+          {TABS.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/50'
+                  ? 'bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/50 shadow-lg shadow-accent-cyan/10'
                   : 'text-gray-400 hover:text-white hover:bg-dark-700'
               }`}
             >
@@ -49,6 +58,7 @@ export default function Home() {
           ))}
         </div>
 
+        {/* Tab Content */}
         <div className="animate-fade-in">
           {activeTab === 'opportunities' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -62,6 +72,7 @@ export default function Home() {
                   <div className="glass-card p-8 text-center">
                     <div className="text-4xl mb-4">🎯</div>
                     <p className="text-gray-400">اختر فرصة لعرض التفاصيل</p>
+                    <p className="text-xs text-gray-600 mt-2">يتم اكتشاف جميع الفرص المربحة تلقائياً</p>
                   </div>
                 )}
               </div>
@@ -69,15 +80,20 @@ export default function Home() {
           )}
 
           {activeTab === 'chart' && <PriceChart />}
-
           {activeTab === 'dexes' && <DexOverview />}
-
           {activeTab === 'execute' && <ExecutionPanel />}
+          {activeTab === 'calculator' && <ProfitCalculator />}
+          {activeTab === 'history' && <ExecutionHistory />}
         </div>
       </main>
 
       <footer className="border-t border-dark-500 p-4 text-center text-sm text-gray-500">
-        <p>Crypto Arbitrage Pro v1.0 — Flash Loans • Flash Swaps • Flash Mint — Zero Gas Fees</p>
+        <p>
+          ⚡ Crypto Arbitrage Pro v2.0 — Flash Loans • Flash Swaps • Flash Mint — 
+          <span className="text-accent-green"> Zero Gas Fees</span> — 
+          <span className="text-accent-cyan"> 59 DEXes</span> — 
+          <span className="text-accent-purple"> 6 Chains</span>
+        </p>
       </footer>
     </div>
   );
