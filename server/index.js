@@ -8,6 +8,9 @@ const { DexPriceAggregator } = require('./services/dex-prices');
 const { RPCManager } = require('./services/rpc-manager');
 const { priceFeed } = require('./services/price-feed');
 const { GaslessExecutor } = require('./services/executor');
+const { TradeMemory } = require('./services/trade-memory');
+const { LendingRouter } = require('./services/lending-router');
+const { ParaSwapService } = require('./services/paraswap');
 const { ethers } = require('ethers');
 require('dotenv').config({ path: '../.env' });
 
@@ -32,6 +35,13 @@ const arbEngine = new ArbitrageEngine(priceFeed);
 const scanner = new Scanner(dexAggregator, arbEngine, rpcManager, priceFeed);
 scanner.setNetworkMode(networkMode);
 scanner.setMinProfit(parseFloat(process.env.MIN_PROFIT_USD || '1'));
+
+// Initialize new services
+const tradeMemory = new TradeMemory();
+const lendingRouter = new LendingRouter(rpcManager);
+const paraswap = new ParaSwapService();
+arbEngine.setTradeMemory(tradeMemory);
+arbEngine.setParaSwap(paraswap);
 
 // Initialize executor with signer
 let executor = null;
@@ -96,6 +106,9 @@ wss.on('connection', (ws) => {
         enabled: autoExecuteEnabled,
         minProfit: autoExecuteMinProfit,
       },
+      botMode: arbEngine.getMode(),
+      tradeStats: tradeMemory.getStats(),
+      lendingSources: lendingRouter.getAllProtocols(),
     },
   }));
 
@@ -162,6 +175,38 @@ async function handleClientMessage(ws, msg) {
         broadcast({ type: 'network_switched', data: { mode: newMode } });
         console.log(`[Server] تبديل الشبكة إلى: ${newMode}`);
       }
+      break;
+
+    case 'switch_bot_mode':
+      arbEngine.setMode(msg.data.mode);
+      broadcast({ type: 'bot_mode_changed', data: { mode: arbEngine.getMode() } });
+      break;
+
+    case 'get_trade_stats':
+      ws.send(JSON.stringify({ type: 'trade_stats', data: tradeMemory.getStats() }));
+      break;
+
+    case 'get_lending_sources':
+      ws.send(JSON.stringify({ type: 'lending_sources', data: lendingRouter.getAllProtocols() }));
+      break;
+
+    case 'set_lending_source':
+      // Store the user's preferred lending source
+      ws.send(JSON.stringify({ type: 'lending_source_set', data: { source: msg.data.source } }));
+      break;
+
+    case 'add_custom_token':
+      scanner.addCustomToken(msg.data.chain, msg.data.symbol, msg.data.address, msg.data.decimals);
+      broadcast({ type: 'custom_tokens_updated', data: scanner.getCustomTokens() });
+      break;
+
+    case 'remove_custom_token':
+      scanner.removeCustomToken(msg.data.chain, msg.data.address);
+      broadcast({ type: 'custom_tokens_updated', data: scanner.getCustomTokens() });
+      break;
+
+    case 'get_custom_tokens':
+      ws.send(JSON.stringify({ type: 'custom_tokens', data: scanner.getCustomTokens() }));
       break;
 
     default:
@@ -269,6 +314,25 @@ async function handleExecution(ws, data) {
       });
     }
 
+    // Record trade in TradeMemory (buyDex)
+    tradeMemory.recordTrade({
+      dex: opportunity.buyDex,
+      pair: opportunity.pair,
+      success: result.success,
+      profit: result.success ? opportunity.profit.usd : 0,
+      gasUsed: parseInt(result.gasUsed) || 0,
+      strategy: strategy || 'flash_loan',
+    });
+    // Record trade in TradeMemory (sellDex)
+    tradeMemory.recordTrade({
+      dex: opportunity.sellDex,
+      pair: opportunity.pair,
+      success: result.success,
+      profit: result.success ? opportunity.profit.usd : 0,
+      gasUsed: parseInt(result.gasUsed) || 0,
+      strategy: strategy || 'flash_loan',
+    });
+
     stats.executionsTotal++;
   } catch (error) {
     broadcast({
@@ -329,6 +393,25 @@ scanner.on('opportunity', (opportunity) => {
             stats.totalProfit += opportunity.profit.usd;
           }
           stats.executionsTotal++;
+
+          // Record trade in TradeMemory (buyDex)
+          tradeMemory.recordTrade({
+            dex: opportunity.buyDex,
+            pair: opportunity.pair,
+            success: result.success,
+            profit: result.success ? opportunity.profit.usd : 0,
+            gasUsed: parseInt(result.gasUsed) || 0,
+            strategy: 'flash_loan',
+          });
+          // Record trade in TradeMemory (sellDex)
+          tradeMemory.recordTrade({
+            dex: opportunity.sellDex,
+            pair: opportunity.pair,
+            success: result.success,
+            profit: result.success ? opportunity.profit.usd : 0,
+            gasUsed: parseInt(result.gasUsed) || 0,
+            strategy: 'flash_loan',
+          });
         })
         .catch((e) => {
           console.error('[AutoExec] خطأ:', e.message);
@@ -481,6 +564,44 @@ app.post('/api/auto-execute', (req, res) => {
   res.json({ enabled: autoExecuteEnabled, minProfit: autoExecuteMinProfit });
 });
 
+// --- New API Endpoints (bot-mode, trade-stats, lending, custom-tokens) ---
+app.get('/api/bot-mode', (req, res) => {
+  res.json({ mode: arbEngine.getMode() });
+});
+
+app.post('/api/bot-mode', (req, res) => {
+  const { mode } = req.body;
+  arbEngine.setMode(mode);
+  broadcast({ type: 'bot_mode_changed', data: { mode: arbEngine.getMode() } });
+  res.json({ mode: arbEngine.getMode() });
+});
+
+app.get('/api/trade-stats', (req, res) => {
+  res.json(tradeMemory.getStats());
+});
+
+app.get('/api/lending-sources', (req, res) => {
+  res.json(lendingRouter.getAllProtocols());
+});
+
+app.get('/api/custom-tokens', (req, res) => {
+  res.json(scanner.getCustomTokens());
+});
+
+app.post('/api/custom-tokens', (req, res) => {
+  const { chain, symbol, address, decimals } = req.body;
+  scanner.addCustomToken(chain, symbol, address, decimals);
+  broadcast({ type: 'custom_tokens_updated', data: scanner.getCustomTokens() });
+  res.json({ success: true, customTokens: scanner.getCustomTokens() });
+});
+
+app.delete('/api/custom-tokens', (req, res) => {
+  const { chain, address } = req.body;
+  scanner.removeCustomToken(chain, address);
+  broadcast({ type: 'custom_tokens_updated', data: scanner.getCustomTokens() });
+  res.json({ success: true, customTokens: scanner.getCustomTokens() });
+});
+
 // --- Start ---
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
@@ -492,6 +613,7 @@ server.listen(PORT, () => {
   console.log(`║   💰 Min Profit: $${autoExecuteMinProfit}                                ║`);
   console.log(`║   🔑 Executor: ${executor ? 'Ready' : 'Not configured'}                          ║`);
   console.log(`║   🏦 DEXes: 59 across 6 chains                       ║`);
+  console.log(`║   🏛️ Lending Sources: 4                               ║`);
   console.log(`╚══════════════════════════════════════════════════════╝\n`);
 
   scanner.start();

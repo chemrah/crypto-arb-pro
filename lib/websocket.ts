@@ -88,6 +88,12 @@ function handleMessage(message: any) {
       if (message.data.autoExecute) {
         store.setAutoExecuteConfig(message.data.autoExecute);
       }
+      if (message.data.botMode) {
+        store.setBotMode(message.data.botMode);
+      }
+      if (message.data.tradeStats) {
+        store.setTradeStats(message.data.tradeStats);
+      }
       break;
 
     case 'new_opportunity':
@@ -222,6 +228,22 @@ function handleMessage(message: any) {
       });
       break;
 
+    case 'bot_mode_changed':
+      store.setBotMode(message.data.mode);
+      break;
+
+    case 'trade_stats':
+      store.setTradeStats(message.data);
+      break;
+
+    case 'custom_tokens_updated':
+      store.setCustomTokens(message.data);
+      break;
+
+    case 'lending_source_changed':
+      store.setLendingSource(message.data.source);
+      break;
+
     case 'error':
       console.error('[WS] خطأ من الخادم:', message.data);
       break;
@@ -262,4 +284,20 @@ export function subscribePair(tokenA: string, tokenB: string) {
 
 export function unsubscribePair(tokenA: string, tokenB: string) {
   sendWsMessage('unsubscribe_pair', { tokenA, tokenB });
+}
+
+export function switchBotMode(mode: string) {
+  sendWsMessage('switch_bot_mode', { mode });
+}
+
+export function addCustomToken(chain: string, symbol: string, address: string, decimals: number) {
+  sendWsMessage('add_custom_token', { chain, symbol, address, decimals });
+}
+
+export function removeCustomToken(chain: string, address: string) {
+  sendWsMessage('remove_custom_token', { chain, address });
+}
+
+export function getTradeStats() {
+  sendWsMessage('get_trade_stats', {});
 }

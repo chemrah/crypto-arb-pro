@@ -38,6 +38,13 @@ class ArbitrageEngine {
   constructor(priceFeed = null) {
     this.priceFeed = priceFeed;
 
+    // Bot mode: 'basic' or 'smart'
+    this.mode = 'basic';
+
+    // Intelligence services (set externally)
+    this.tradeMemory = null;
+    this.paraswap = null;
+
     // Protocol fees
     this.AAVE_FLASH_LOAN_FEE = 0.0009; // 0.09%
     this.MAKER_FLASH_MINT_FEE = 0;      // 0% for DAI
@@ -68,6 +75,25 @@ class ArbitrageEngine {
 
   setSlippage(pct) {
     this.SLIPPAGE_TOLERANCE = pct;
+  }
+
+  setTradeMemory(tm) {
+    this.tradeMemory = tm;
+  }
+
+  setParaSwap(ps) {
+    this.paraswap = ps;
+  }
+
+  setMode(mode) {
+    if (mode === 'basic' || mode === 'smart') {
+      this.mode = mode;
+      console.log(`[ArbitrageEngine] Mode switched to: ${mode}`);
+    }
+  }
+
+  getMode() {
+    return this.mode;
   }
 
   // ─── Sync from PriceFeed instance ─────────────────────────
@@ -133,7 +159,20 @@ class ArbitrageEngine {
       }
     }
 
-    return opportunities.sort((a, b) => b.profit.usd - a.profit.usd);
+    // Sort by profit
+    let sorted = opportunities.sort((a, b) => b.profit.usd - a.profit.usd);
+
+    // Smart mode: re-rank using TradeMemory intelligence
+    if (this.mode === 'smart' && this.tradeMemory) {
+      sorted = this.tradeMemory.rankOpportunities(sorted);
+      // Add confidenceScore field from intelligence data
+      sorted = sorted.map(opp => ({
+        ...opp,
+        confidenceScore: opp.intelligence ? opp.intelligence.confidenceScore : opp.confidence,
+      }));
+    }
+
+    return sorted;
   }
 
   // ═══════════════════════════════════════════════════════════

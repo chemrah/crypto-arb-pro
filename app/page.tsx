@@ -12,6 +12,9 @@ import { DexOverview } from './components/DexOverview';
 import { ExecutionPanel } from './components/ExecutionPanel';
 import { ProfitCalculator } from './components/ProfitCalculator';
 import { ExecutionHistory } from './components/ExecutionHistory';
+import { BotModeSelector } from './components/BotModeSelector';
+import { LendingSourceSelector } from './components/LendingSourceSelector';
+import { CustomTokenManager } from './components/CustomTokenManager';
 
 const TABS = [
   { id: 'opportunities', label: 'الفرص الحية', icon: '🎯' },
@@ -20,6 +23,7 @@ const TABS = [
   { id: 'execute', label: 'التنفيذ', icon: '⚡' },
   { id: 'calculator', label: 'حاسبة الأرباح', icon: '🧮' },
   { id: 'history', label: 'السجل', icon: '📜' },
+  { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -84,15 +88,23 @@ export default function Home() {
           {activeTab === 'execute' && <ExecutionPanel />}
           {activeTab === 'calculator' && <ProfitCalculator />}
           {activeTab === 'history' && <ExecutionHistory />}
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <BotModeSelector />
+              <LendingSourceSelector />
+              <CustomTokenManager />
+            </div>
+          )}
         </div>
       </main>
 
       <footer className="border-t border-dark-500 p-4 text-center text-sm text-gray-500">
         <p>
-          ⚡ Crypto Arbitrage Pro v2.0 — Flash Loans • Flash Swaps • Flash Mint — 
+          ⚡ Crypto Arbitrage Pro v3.0 — Flash Loans • Flash Swaps • Flash Mint — 
           <span className="text-accent-green"> Zero Gas Fees</span> — 
           <span className="text-accent-cyan"> 59 DEXes</span> — 
-          <span className="text-accent-purple"> 6 Chains</span>
+          <span className="text-accent-purple"> 6 Chains</span> — 
+          <span className="text-amber-400"> 4 Lending Sources</span>
         </p>
       </footer>
     </div>

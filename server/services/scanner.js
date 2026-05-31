@@ -1,5 +1,9 @@
 const EventEmitter = require('events');
 const { ethers } = require('ethers');
+const fs = require('fs');
+const path = require('path');
+
+const CUSTOM_TOKENS_FILE = path.join(__dirname, '../../data/custom-tokens.json');
 
 class Scanner extends EventEmitter {
   constructor(dexAggregator, arbEngine, rpcManager, priceFeed) {
@@ -23,7 +27,12 @@ class Scanner extends EventEmitter {
       ethers.parseUnits('100000', 18),
     ];
 
+    // Custom token management
+    this.customTokens = {};
+    this.customPairs = [];
+
     this._initDefaultPairs();
+    this._loadCustomTokens();
   }
 
   _initDefaultPairs() {
@@ -251,6 +260,83 @@ class Scanner extends EventEmitter {
 
   setMinProfit(usd) {
     this.minProfitUSD = Math.max(0.01, usd);
+  }
+
+  // ─── Custom Token Management ──────────────────────────────
+  addCustomToken(chain, symbol, address, decimals = 18) {
+    if (!this.customTokens[chain]) this.customTokens[chain] = {};
+    this.customTokens[chain][address] = { symbol, decimals };
+    this._saveCustomTokens();
+    console.log(`[Scanner] Custom token added: ${symbol} (${address}) on ${chain}`);
+  }
+
+  removeCustomToken(chain, address) {
+    if (this.customTokens[chain]) {
+      delete this.customTokens[chain][address];
+      if (Object.keys(this.customTokens[chain]).length === 0) {
+        delete this.customTokens[chain];
+      }
+    }
+    this._saveCustomTokens();
+    console.log(`[Scanner] Custom token removed: ${address} on ${chain}`);
+  }
+
+  addCustomPair(tokenA, tokenB, chain = 'arbitrum', symbol = null) {
+    const pairSymbol = symbol || `${tokenA.slice(0, 6)}/${tokenB.slice(0, 6)}`;
+    const exists = this.customPairs.find(
+      (p) => p.tokenA === tokenA && p.tokenB === tokenB && p.chain === chain
+    );
+    if (!exists) {
+      this.customPairs.push({ tokenA, tokenB, chain, symbol: pairSymbol });
+      this.addPair(tokenA, tokenB, chain);
+      this._saveCustomTokens();
+      console.log(`[Scanner] Custom pair added: ${pairSymbol} on ${chain}`);
+    }
+  }
+
+  getCustomTokens() {
+    return this.customTokens;
+  }
+
+  getCustomPairs() {
+    return this.customPairs;
+  }
+
+  _loadCustomTokens() {
+    try {
+      if (fs.existsSync(CUSTOM_TOKENS_FILE)) {
+        const raw = fs.readFileSync(CUSTOM_TOKENS_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        this.customTokens = data.customTokens || {};
+        this.customPairs = data.customPairs || [];
+
+        // Re-add custom pairs to tracked pairs
+        for (const cp of this.customPairs) {
+          this.addPair(cp.tokenA, cp.tokenB, cp.chain);
+        }
+
+        console.log(`[Scanner] Loaded ${Object.keys(this.customTokens).length} custom token chains, ${this.customPairs.length} custom pairs`);
+      }
+    } catch (e) {
+      console.warn('[Scanner] Could not load custom tokens:', e.message);
+    }
+  }
+
+  _saveCustomTokens() {
+    try {
+      const dir = path.dirname(CUSTOM_TOKENS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const data = {
+        customTokens: this.customTokens,
+        customPairs: this.customPairs,
+        savedAt: new Date().toISOString(),
+      };
+
+      fs.writeFileSync(CUSTOM_TOKENS_FILE, JSON.stringify(data, null, 2));
+    } catch (e) {
+      console.error('[Scanner] Save custom tokens error:', e.message);
+    }
   }
 }
 

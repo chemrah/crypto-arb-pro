@@ -109,6 +109,12 @@ interface ArbStore {
   gasPrice: number;
   gasSaved: number;
 
+  // Bot mode & settings
+  botMode: 'basic' | 'smart';
+  tradeStats: any;
+  customTokens: Record<string, any>;
+  lendingSource: string;
+
   // Actions - Connection
   setConnected: (connected: boolean) => void;
   setWalletAddress: (address: string) => void;
@@ -138,6 +144,12 @@ interface ArbStore {
   setEthPrice: (price: number) => void;
   setGasPrice: (price: number) => void;
   addGasSaved: (amount: number) => void;
+
+  // Actions - Bot mode & settings
+  setBotMode: (mode: string) => void;
+  setTradeStats: (stats: any) => void;
+  setCustomTokens: (tokens: any) => void;
+  setLendingSource: (source: string) => void;
 }
 
 export const useArbStore = create<ArbStore>((set) => ({
@@ -182,6 +194,12 @@ export const useArbStore = create<ArbStore>((set) => ({
   gasPrice: 0.1,
   gasSaved: 0,
 
+  // Bot mode & settings
+  botMode: 'basic',
+  tradeStats: null,
+  customTokens: {},
+  lendingSource: 'auto',
+
   // Actions
   setConnected: (connected) => set({ isConnected: connected }),
   setWalletAddress: (address) => set({ walletAddress: address }),
@@ -220,4 +238,9 @@ export const useArbStore = create<ArbStore>((set) => ({
   setGasPrice: (price) => set({ gasPrice: price }),
   addGasSaved: (amount) =>
     set((state) => ({ gasSaved: state.gasSaved + amount })),
+
+  setBotMode: (mode) => set({ botMode: mode as 'basic' | 'smart' }),
+  setTradeStats: (stats) => set({ tradeStats: stats }),
+  setCustomTokens: (tokens) => set({ customTokens: tokens }),
+  setLendingSource: (source) => set({ lendingSource: source }),
 }));
