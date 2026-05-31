@@ -22,13 +22,10 @@ app.use(cors());
 app.use(express.json());
 
 // --- Initialize all services ---
-const rpcManager = new RPCManager(
-  process.env.ALCHEMY_API_KEY,
-  process.env.INFURA_API_KEY
-);
+const rpcManager = new RPCManager();
 
 const networkMode = process.env.NETWORK_MODE || 'mainnet';
-rpcManager.switchNetwork(networkMode);
+rpcManager.setNetworkMode(networkMode);
 
 const dexAggregator = new DexPriceAggregator(rpcManager);
 const arbEngine = new ArbitrageEngine(priceFeed);
@@ -47,7 +44,7 @@ arbEngine.setParaSwap(paraswap);
 let executor = null;
 try {
   if (process.env.PRIVATE_KEY) {
-    const provider = rpcManager.getProvider('arbitrum', networkMode);
+    const provider = rpcManager.getProvider('arbitrum');
     const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     executor = new GaslessExecutor({
       provider,
@@ -169,7 +166,7 @@ async function handleClientMessage(ws, msg) {
       const newMode = msg.data.mode;
       if (newMode === 'testnet' || newMode === 'mainnet') {
         scanner.setNetworkMode(newMode);
-        rpcManager.switchNetwork(newMode);
+        rpcManager.setNetworkMode(newMode);
         if (dexAggregator.setNetworkMode) dexAggregator.setNetworkMode(newMode);
         latestOpportunities = [];
         broadcast({ type: 'network_switched', data: { mode: newMode } });
@@ -495,7 +492,7 @@ app.post('/api/network', (req, res) => {
   const { mode } = req.body;
   if (mode === 'testnet' || mode === 'mainnet') {
     scanner.setNetworkMode(mode);
-    rpcManager.switchNetwork(mode);
+    rpcManager.setNetworkMode(mode);
     latestOpportunities = [];
     broadcast({ type: 'network_switched', data: { mode } });
     res.json({ success: true, mode });
